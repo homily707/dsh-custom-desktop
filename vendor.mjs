@@ -192,130 +192,10 @@ const css = region(official, "//#region \\0dsh-css:")
 	.replace('tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-model-selection";', 'tag.dataset.plugin = "dsh-custom-desktop";');
 //#endregion
 
-//#region sidebar fork marker (hand-written, not vendored)
-/**
- * Session-list fork markers: a leading `└` plus one indent step per lineage level
- * on every row whose session came from a fork. MARKING ONLY — the pass never
- * moves, hides, reorders or re-classes a row, so everything the official sidebar
- * owns keeps working: the base order (which already places a fork right after its
- * source), the archived filter and its graying, pinned rows, drag reorder, and
- * the per-Workspace overflow control.
- *
- * Data: `ctx.sessions.list` snapshots carry `parentId` for every fork child (the
- * Host projects the journal header's `parentSession`) and `origin: "subagent"`
- * for addressed subagent children — those are not forks and lose no marker.
- *
- * DOM: `data-row-key="session:<id>"` on the official row element is the anchor. It
- * is an explicit attribute rather than a hashed class name, and the marker is a
- * `data-` attribute plus one custom property, so React re-renders (which only
- * rewrite the props they own) leave it in place. Indentation rides a `::before`
- * flex item, which leaves the official `padding-inline-start` — the one already
- * carrying the Workspace-group indent — untouched.
- */
-const forkMarker = `		//#region sidebar fork marker (dsh-custom-desktop)
-		const FORK_ROW_SELECTOR = '[data-row-key^="session:"]';
-		const FORK_DEPTH_ATTR = "data-dsh-fork-depth";
-		/** Indent per lineage level, in px (the marker glyph itself is 12px wide). */
-		const FORK_INDENT_STEP = 12;
-		/** The marker: a flex item ahead of the row's own content, in the caption tone. */
-		const FORK_MARK_CSS = '[data-dsh-fork-depth]::before{content:"└";flex:none;width:12px;margin-left:var(--dsh-fork-indent,0px);color:var(--dsw-alias-label-caption);font-size:12px;line-height:20px}';
-		/**
-		* Lineage depth of one row, 1 being a direct fork child. A missing or cyclic
-		* parent chain counts as a root, matching the runtime's own flattening.
-		* @param byId - session-list rows by id.
-		* @param id - the row's session id.
-		* @returns the depth.
-		*/
-		function forkDepth(byId, id) {
-			const seen = new Set([id]);
-			let depth = 0;
-			let at = byId[id];
-			while (at !== void 0) {
-				const parent = at.parentId !== void 0 ? at.parentId : at.parentSessionId;
-				if (parent === void 0 || seen.has(parent)) break;
-				seen.add(parent);
-				depth += 1;
-				at = byId[parent];
-			}
-			return depth;
-		}
-		/** Apply the marker in place; no other row property is touched. */
-		function markForkRow(row, depth) {
-			const wanted = String(depth);
-			if (row.getAttribute(FORK_DEPTH_ATTR) === wanted) return;
-			row.setAttribute(FORK_DEPTH_ATTR, wanted);
-			row.style.setProperty("--dsh-fork-indent", String((depth - 1) * FORK_INDENT_STEP) + "px");
-		}
-		/** Drop the marker from a row that is not (or no longer) a fork. */
-		function unmarkForkRow(row) {
-			if (row.getAttribute(FORK_DEPTH_ATTR) === null) return;
-			row.removeAttribute(FORK_DEPTH_ATTR);
-			row.style.removeProperty("--dsh-fork-indent");
-		}
-		/**
-		* Install the marker: one stylesheet plus an idempotent re-apply pass driven
-		* by the session list (a row can render before its summary lands) and by row
-		* churn (the list re-renders on activity and filter changes).
-		* @param ctx - client scope owning the effect, when it has one.
-		* @param sessions - the session face (its list snapshot carries parentId).
-		* @returns the disposer, for callers without ctx.effect.
-		*/
-		function installForkMarkers(ctx, sessions) {
-			const list = (sessions !== void 0 && sessions !== null) ? sessions.list : void 0;
-			if (typeof document === "undefined" || document.body === null || document.body === void 0
-				|| typeof MutationObserver === "undefined" || list === void 0
-				|| typeof list.getSnapshot !== "function" || typeof list.subscribe !== "function") {
-				return () => {};
-			}
-			const style = document.createElement("style");
-			style.dataset.plugin = "dsh-custom-desktop";
-			style.dataset.pluginCss = "dsh-custom-desktop/fork-marker.css";
-			style.textContent = FORK_MARK_CSS;
-			document.head.appendChild(style);
-			let frame;
-			/** One pass over the rendered rows: mark the forks, clear everybody else. */
-			const paintRows = () => {
-				const snapshot = list.getSnapshot() || {};
-				const byId = snapshot.byId || {};
-				for (const row of document.querySelectorAll(FORK_ROW_SELECTOR)) {
-					const id = row.getAttribute("data-row-key").slice("session:".length);
-					const entry = byId[id];
-					const parent = entry === void 0 ? void 0 : (entry.parentId !== void 0 ? entry.parentId : entry.parentSessionId);
-					if (parent === void 0 || entry.origin === "subagent") unmarkForkRow(row);
-					else markForkRow(row, forkDepth(byId, id));
-				}
-			};
-			const schedule = () => {
-				if (frame !== void 0) return;
-				frame = requestAnimationFrame(() => {
-					frame = void 0;
-					paintRows();
-				});
-			};
-			const stopList = list.subscribe(schedule);
-			const observer = new MutationObserver(schedule);
-			observer.observe(document.body, { childList: true, subtree: true });
-			paintRows();
-			const dispose = () => {
-				if (frame !== void 0) cancelAnimationFrame(frame);
-				frame = void 0;
-				observer.disconnect();
-				stopList();
-				if (style.isConnected) style.remove();
-				for (const row of document.querySelectorAll("[" + FORK_DEPTH_ATTR + "]")) unmarkForkRow(row);
-			};
-			if (typeof ctx.effect === "function") ctx.effect(() => dispose);
-			return dispose;
-		}
-		//#endregion
-`;
-//#endregion
-
 //#region output
 const header = `/**
- * Browser half of \`dsh-custom-desktop\` — two desktop-app-only tweaks: hover
- * shortcuts on the composer's model seat (\`conversation.input.model\`), and fork
- * markers in the session list.
+ * Browser half of \`dsh-custom-desktop\` — one desktop-app-only tweak: hover
+ * shortcuts on the composer's model seat (\`conversation.input.model\`).
  *
  * Strategy: register a second occupant of the single slot at priority -1 (a slot
  * renders its LOWEST-priority entry), which shadows the official ModelSelect. The
@@ -338,14 +218,6 @@ const header = `/**
  * have to synthesise trigger→cell click pairs and depend on hashed class names
  * (\`cl2Rlq_*\`); the copy keeps i18n, keyboard navigation, search and menu
  * positioning exact for the same reason.
- *
- * The fork marker is the opposite call: indentation is presentational, so it is a
- * DOM-level mark (\`data-dsh-fork-depth\` + a \`└\` pseudo-element) keyed on the
- * official row attribute \`data-row-key="session:<id>"\` and on the \`parentId\` the
- * session-list snapshot carries. It marks in place — never moves, hides, reorders
- * or re-classes a row — so the official order, archived filter, pinned rows, drag
- * reorder and overflow control are unaffected. Its region below is hand-written,
- * not vendored.
  *
  * Generated by \`node vendor.mjs\` — do not edit by hand; patch vendor.mjs instead.
  * Desktop-only by construction: the vendored markup and CSS are pinned to the
@@ -381,14 +253,10 @@ const footer = `\t\t//#region plugin
 \t\t];
 \t\t/**
 \t\t* Client plugin body: take the composer's model seat with the hover-aware copy,
-\t\t* and mark fork rows in the session list.
 \t\t* \`locale: "model"\` reuses the official dictionary namespace for every string.
 \t\t* @param ctx - client root context.
 \t\t*/
 \t\tfunction apply(ctx) {
-\t\t\tctx.inject(["sessions"], (scope) => {
-\t\t\t\tinstallForkMarkers(scope, scope.sessions);
-\t\t\t});
 \t\t\tctx.inject(["slots", "modelDirectories"], (scope) => {
 \t\t\t\tconst models = scope.modelDirectories;
 \t\t\t\tconst sessions = scope.sessions;
@@ -427,7 +295,6 @@ const out = [
 	css,
 	region(official, "//#region lib/types/client/provider-order.js"),
 	component,
-	forkMarker,
 	footer
 ].join("\n");
 
