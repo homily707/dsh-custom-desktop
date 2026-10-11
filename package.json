@@ -1,0 +1,44 @@
+{
+	"name": "dsh-custom-desktop",
+	"description": "Desktop-app-only DSH UI tweaks: dwelling on the composer's model name opens the provider-grouped model list directly, dwelling on the effort caption opens the effort list; forked sessions get a leading └ and one indent step per lineage level in the sidebar. The composer component is vendored from the 0.2.0-rc.2 build the desktop app ships.",
+	"version": "0.1.0",
+	"type": "module",
+	"main": "./index.mjs",
+	"exports": {
+		".": "./index.mjs",
+		"./client": "./client.js",
+		"./cordis.patch.yml": "./cordis.patch.yml",
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"index.mjs",
+		"client.js",
+		"cordis.patch.yml",
+		"README.md"
+	],
+	"scripts": {
+		"test": "node check-client.mjs"
+	},
+	"dsh": {
+		"bundle": {
+			"patch": "./cordis.patch.yml"
+		},
+		"client": {
+			"platform": "web",
+			"inject": [
+				"@deepseek-ai/dsh-client-ui-model-selection",
+				"@deepseek-ai/dsh-api-session-controller"
+			]
+		}
+	},
+	"keywords": [
+		"deepseek-harness",
+		"dsh",
+		"plugin",
+		"custom-ui",
+		"model-select",
+		"hover",
+		"desktop"
+	],
+	"license": "MIT"
+}

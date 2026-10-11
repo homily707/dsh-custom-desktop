@@ -1,0 +1,9 @@
+# The layer applied when a profile lists this bundle.
+# Install (desktop app profile, same route as dsh-quick-fork):
+#   add link:/Users/lmh/codes/homily707/my-dsh/dsh-custom-desktop
+#
+# 本包只有浏览器半(host 侧空实现),这一行的唯一作用是让 host Loader 收录该包 ——
+# client-modules 从 Loader 条目里发现 dsh.client 声明,才能把 client.js 投递给页面。
+- insert:
+    - id: custom-desktop
+      name: dsh-custom-desktop
