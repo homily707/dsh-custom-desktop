@@ -1,7 +1,7 @@
 {
 	"name": "dsh-custom-desktop",
-	"description": "Desktop-app-only DSH UI tweak: dwelling on the composer's model name opens the provider-grouped model list directly, dwelling on the effort caption opens the effort list. The composer component is vendored from the 0.2.0-rc.2 build the desktop app ships.",
-	"version": "0.1.0",
+	"description": "Desktop-only DSH composer customization: hover model and effort menus, plus configurable native commands to cycle reasoning effort and open the model picker. Vendored from the desktop 0.2.1-rc.2 build.",
+	"version": "0.2.0",
 	"type": "module",
 	"main": "./index.mjs",
 	"exports": {

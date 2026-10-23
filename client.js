@@ -1,5 +1,5 @@
 /**
- * Browser half of `dsh-custom-desktop` — one desktop-app-only tweak: hover
+ * Browser half of `dsh-custom-desktop` — desktop-only hover and native
  * shortcuts on the composer's model seat (`conversation.input.model`).
  *
  * Strategy: register a second occupant of the single slot at priority -1 (a slot
@@ -8,15 +8,16 @@
  * need: the `model` dictionaries, the /model popup, and the per-session
  * ModelDirectoryResolver service behind `ctx.modelDirectories`.
  *
- * The component below is vendored VERBATIM from the build the DeepSeek Harness
- * desktop app ships — @deepseek-ai/dsh-client-ui-model-selection@0.2.0-rc.2
+ * The component below is vendored from the build the DeepSeek Harness
+ * desktop app ships — @deepseek-ai/dsh-client-ui-model-selection@0.2.1-rc.2
  * (app.asar/dsh) — minus the catalog/directory/resolver classes, the locale
  * dictionaries and the /model contribution (a resolver and dictionaries are
- * mounted by the official plugin; only ModelSelect is needed here). The ONLY
- * addition is the hover lifecycle: dwelling 150ms on the model name opens the
+ * mounted by the official plugin; only ModelSelect is needed here). The
+ * hover lifecycle adds: dwelling 150ms on the model name opens the
  * provider-grouped model list directly, dwelling on the effort caption opens the
  * effort list, and leaving the seat closes a hover-opened menu after 300ms. The
- * click path is byte-identical to the official one.
+ * click path is unchanged. Two unbound native commands open the model pane
+ * or cycle the current model's effort choices through the existing handlers.
  *
  * Why a vendored copy instead of DOM manipulation: "open straight into pane X"
  * is React state inside the official component. A DOM-level implementation would
@@ -156,7 +157,7 @@ window.__ModuleLoader__.load({
 		* store/verbs) + the standard locale seat.
 		* @returns the trigger and, while open, the two-level menu.
 		*/
-		function HoverModelSelect({ locked, available, directory, load, select, t }) {
+		function HoverModelSelect({ registerCommands, locked, available, directory, load, select, t }) {
 			const state = (0, react.useSyncExternalStore)((fn) => directory.subscribe(fn), () => directory.getSnapshot());
 			const [open, setOpen] = (0, react.useState)(false);
 			const [pane, setPane] = (0, react.useState)("root");
@@ -182,7 +183,14 @@ window.__ModuleLoader__.load({
 			}, [open]);
 			(0, react.useEffect)(() => clearHover, []);
 			const id = (0, react.useId)();
-			const groups = (0, react.useMemo)(() => orderModelProviders(state.groups), [state.groups]);
+			const accountProviderName = t("provider.account");
+			const groups = (0, react.useMemo)(() => orderModelProviders(state.groups).map((group) => ({
+				...group,
+				provider: {
+					id: group.id,
+					name: group.id === "deepseek-account" ? accountProviderName : group.name
+				}
+			})), [state.groups, accountProviderName]);
 			const choices = (0, react.useMemo)(() => groups.flatMap((group) => group.models.map((model) => ({
 				group,
 				model,
@@ -210,7 +218,7 @@ window.__ModuleLoader__.load({
 			const currentChoice = choices[state.current === null ? -1 : choices.findIndex((c) => c.selection.provider === state.current?.provider && c.selection.model === state.current.model)];
 			const reasoning = currentChoice?.model.reasoning;
 			const effectiveEffort = state.current?.reasoningEffort ?? reasoning?.defaultEffort;
-			const effortLabel = reasoning === void 0 ? state.retainedEffort : effectiveEffort === void 0 ? t("effort.providerDefault") : reasoning.efforts.find((level) => level.id === effectiveEffort)?.name ?? effectiveEffort;
+			const effortLabel = currentChoice === void 0 ? void 0 : reasoning === void 0 ? state.retainedEffort : effectiveEffort === void 0 ? t("effort.providerDefault") : reasoning.efforts.find((level) => level.id === effectiveEffort)?.name ?? effectiveEffort;
 			const effortChoices = (0, react.useMemo)(() => reasoning === void 0 ? [] : [...reasoning.defaultEffort === void 0 ? [{
 				key: "provider-default",
 				effort: void 0,
@@ -286,7 +294,7 @@ window.__ModuleLoader__.load({
 				visibleModels
 			]);
 			(0, react.useLayoutEffect)(() => {
-				if (!open) {
+				if (!available || !open) {
 					setMenuPos(null);
 					return;
 				}
@@ -309,24 +317,42 @@ window.__ModuleLoader__.load({
 				place();
 				window.addEventListener("scroll", place, true);
 				window.addEventListener("resize", place);
+				const menu = menuRef.current;
+				const observer = typeof ResizeObserver !== "undefined" && menu !== null ? new ResizeObserver(place) : null;
+				if (menu !== null) observer?.observe(menu);
 				return () => {
+					observer?.disconnect();
 					window.removeEventListener("scroll", place, true);
 					window.removeEventListener("resize", place);
 				};
 			}, [
+				available,
 				open,
 				pane,
 				state,
 				query
 			]);
+			(0, react.useEffect)(() => {
+				if (available) load();
+			}, [available, directory]);
+			(0, react.useLayoutEffect)(() => registerCommands((action) => {
+				if (!available || locked || busy) return { status: "blocked", reason: "当前模型选择不可用或正在更新" };
+				if (action === "model") return {
+					status: "handled",
+					run: () => { show(); drill("model"); pinHover(); }
+				};
+				if (state.current === null || effortChoices.length < 2) return { status: "blocked", reason: "当前模型没有可切换的推理等级，或模型目录尚未就绪" };
+				const index = effortChoices.findIndex((choice) => choice.effort === effectiveEffort);
+				return { status: "handled", run: () => chooseEffort(effortChoices[(index + 1) % effortChoices.length].effort) };
+			}));
 			if (!available) return null;
 			const show = () => {
 				setSelectionFocus(false);
 				triggerRef.current?.focus();
 				setQuery("");
 				setHighlightedIndex(null);
-				if (state.current === null) paneFocus.current = "drill";
-				setPane(state.current === null ? "model" : "root");
+				if (currentChoice === void 0) paneFocus.current = "drill";
+				setPane(currentChoice === void 0 ? "model" : "root");
 				setOpen(true);
 				reload();
 			};
@@ -351,7 +377,7 @@ window.__ModuleLoader__.load({
 				paneFocus.current = "drill";
 				setPane(next);
 			};
-			//#region hover shortcut (dsh-custom-desktop's only addition)
+			//#region hover interaction (dsh-custom-desktop)
 			/** Drop both pending hover timers. */
 			const clearHover = () => {
 				if (hoverTimers.current.open !== 0) clearTimeout(hoverTimers.current.open);
@@ -410,7 +436,7 @@ window.__ModuleLoader__.load({
 				if (event.nativeEvent.isComposing) return;
 				if (event.key === "Escape" && open) {
 					event.preventDefault();
-					if (pane !== "root" && state.current !== null) back(pane);
+					if (pane !== "root" && currentChoice !== void 0) back(pane);
 					else close(true);
 					return;
 				}
@@ -433,7 +459,7 @@ window.__ModuleLoader__.load({
 				if (event.key === "Tab") {
 					if (event.shiftKey) {
 						event.preventDefault();
-						if (pane !== "root" && state.current !== null) back(pane);
+						if (pane !== "root" && currentChoice !== void 0) back(pane);
 						else close(true);
 						return;
 					}
@@ -501,14 +527,18 @@ window.__ModuleLoader__.load({
 					...effort === void 0 ? {} : { reasoningEffort: effort }
 				});
 			};
-			const waiting = state.current === null && state.status === "loading";
-			const modelLabel = waiting ? t("trigger.loading") : currentChoice?.model.name ?? (state.current === null ? t("trigger.fallback") : `${state.current.provider}/${state.current.model}`);
+			const waiting = currentChoice === void 0 && state.status === "loading";
+			const modelLabel = waiting ? t("trigger.loading") : currentChoice?.model.name ?? t("trigger.fallback");
 			const triggerLabel = effortLabel === void 0 ? modelLabel : `${modelLabel} · ${effortLabel}`;
-			const triggerAria = waiting ? t("trigger.loading") : state.current === null ? t("trigger.selectAria") : effortLabel === void 0 ? t("trigger.aria", { model: modelLabel }) : t("trigger.ariaEffort", {
+			const triggerAria = waiting ? t("trigger.loading") : currentChoice === void 0 ? t("trigger.selectAria") : effortLabel === void 0 ? t("trigger.aria", { model: modelLabel }) : t("trigger.ariaEffort", {
 				model: modelLabel,
 				effort: effortLabel
 			});
-			itemRefs.current = [];
+			const renderModelLabel = (provider, model, placement, selected) => (0, react_jsx_runtime.jsx)("span", {
+				"data-provider-id": provider.id,
+				"data-model-id": model.id,
+				children: model.name
+			});
 			let itemIndex = 0;
 			let modelIndex = 0;
 			const itemRef = () => {
@@ -556,7 +586,7 @@ window.__ModuleLoader__.load({
 							(0, react_jsx_runtime.jsx)("span", {
 								className: ModelSelect_module_css_default.triggerLabel,
 								onMouseEnter: () => hoverOpen("model"),
-								children: modelLabel
+								children: currentChoice === void 0 ? modelLabel : renderModelLabel(currentChoice.group.provider, currentChoice.model, "trigger", true)
 							}),
 							effortLabel !== void 0 && (0, react_jsx_runtime.jsx)("span", {
 								className: ModelSelect_module_css_default.triggerEffort,
@@ -595,7 +625,7 @@ window.__ModuleLoader__.load({
 									}),
 									(0, react_jsx_runtime.jsx)("span", {
 										className: ModelSelect_module_css_default.cellValue,
-										children: modelLabel
+										children: currentChoice === void 0 ? modelLabel : renderModelLabel(currentChoice.group.provider, currentChoice.model, "menu", true)
 									}),
 									(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconChevronRightOutlineRegular, { className: ModelSelect_module_css_default.cellChevron })
 								]
@@ -682,7 +712,7 @@ window.__ModuleLoader__.load({
 									hidden: filteredGroups.length === 0,
 									children: filteredGroups.map((group) => {
 										return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.MenuGroup, {
-											label: group.id === "deepseek-account" ? t("provider.account") : group.name,
+											label: group.provider.name,
 											children: group.models.map((model) => {
 												const index = modelIndex++;
 												const selected = state.current?.provider === group.id && state.current.model === model.id;
@@ -714,7 +744,7 @@ window.__ModuleLoader__.load({
 														className: ModelSelect_module_css_default.optionCopy,
 														children: (0, react_jsx_runtime.jsx)("span", {
 															className: ModelSelect_module_css_default.modelName,
-															children: model.name
+															children: renderModelLabel(group.provider, model, "option", selected)
 														})
 													}), (0, react_jsx_runtime.jsx)("span", {
 														className: ModelSelect_module_css_default.check,
@@ -797,6 +827,28 @@ window.__ModuleLoader__.load({
 		* @param ctx - client root context.
 		*/
 		function apply(ctx) {
+			const commands = new Map();
+			ctx.inject(["shortcuts", "layout"], (scope) => {
+				for (const [action, id, label] of [
+					["effort", "custom-desktop.reasoning-effort.cycle", "切换推理等级（Reasoning effort）"],
+					["model", "custom-desktop.model.open", "唤出模型选择卡"]
+				]) scope.effect(() => scope.shortcuts.register({
+					id,
+					label: () => label,
+					aliases: [label, id, action === "effort" ? "reasoning effort" : "model selection"],
+					defaults: {},
+					regions: ["page", "editable", "terminal"],
+					modals: [],
+					resolve: (context) => {
+						const current = Object.values(ctx.sessions.list.getSnapshot().byId).find((row) => (row.retainedBy.mainView ?? 0) > 0);
+						const resolve = current === undefined ? undefined : commands.get(current.id);
+						if (context.modal !== null || scope.layout.panelInfo.getSnapshot().activePanelId !== null || resolve === undefined) {
+							return { status: "blocked", reason: "当前没有可操作的会话模型选择器" };
+						}
+						return resolve(action);
+					}
+				}), id);
+			});
 			ctx.inject(["slots", "modelDirectories"], (scope) => {
 				const models = scope.modelDirectories;
 				const sessions = scope.sessions;
@@ -810,6 +862,10 @@ window.__ModuleLoader__.load({
 						const available = sessions.subagentAddress(sessionId) === void 0;
 						return {
 							available,
+							registerCommands: (resolve) => {
+								commands.set(sessionId, resolve);
+								return () => { if (commands.get(sessionId) === resolve) commands.delete(sessionId); };
+							},
 							directory: directory.store,
 							load: () => {
 								if (available) directory.load().catch(() => {});

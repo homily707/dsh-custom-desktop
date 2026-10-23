@@ -96,17 +96,22 @@ check(
 );
 
 let registered = null;
+const shortcutCommands = [];
 const directoryStore = { getSnapshot: () => ({ groups: [], current: null, status: "ready", failures: [], retainedEffort: undefined }), subscribe: () => () => {} };
 const slots = {
 	inject: (_name, register) => register(),
 	register: (entry, component) => (registered = { entry, component })
 };
 exportsObj.apply({
+	sessions: { list: { getSnapshot: () => ({ byId: {} }) } },
 	inject: (_faces, body) =>
 		body({
 			modelDirectories: { directoryFor: () => ({ store: directoryStore, load: async () => {}, select: async () => ({ ok: true }) }) },
 			sessions: { subagentAddress: () => undefined },
-			slots
+			slots,
+			shortcuts: { register: (command) => { shortcutCommands.push(command); return () => {}; } },
+			layout: { panelInfo: { getSnapshot: () => ({ activePanelId: null }) } },
+			effect: (fn) => fn()
 		}),
 	slots
 });
@@ -115,6 +120,7 @@ check(
 	registered?.entry?.name === "conversation.input.model" && registered.entry.priority === -1,
 	JSON.stringify(registered?.entry?.name) + " priority=" + registered?.entry?.priority
 );
+check("two native commands without default bindings", shortcutCommands.length === 2 && shortcutCommands.every((command) => Object.keys(command.defaults).length === 0));
 check("reuses the official locale namespace", registered?.entry?.locale === "model");
 check("shadow component is the vendored one", typeof registered?.component === "function");
 const face = registered?.entry?.inject("session-1");

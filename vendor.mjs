@@ -5,7 +5,7 @@
  * out of the running app's `app.asar` (the desktop profile's client rows come from
  * there, not from the profile's node_modules), keeps the four regions this plugin
  * needs (clsx, ModelSelect CSS, provider order, the component), and re-applies the
- * hover delta. Anchors are checked, so an upstream refactor fails loudly instead of
+ * hover and native-command delta. Anchors are checked, so an upstream refactor fails loudly instead of
  * producing a half-patched bundle; the file it writes is the one `check-client.mjs`
  * then verifies.
  *
@@ -105,7 +105,7 @@ component = insert(component, "const itemRefs = (0, react.useRef)([]);", [
 
 // 2. Hover handlers, next to the official show/close/drill verbs they build on.
 component = insert(component, "/** Leave a drilled pane for the root one, handing the keyboard back to its cell. */", [
-	"//#region hover shortcut (dsh-custom-desktop's only addition)",
+	"//#region hover interaction (dsh-custom-desktop)",
 	"/** Drop both pending hover timers. */",
 	"const clearHover = () => {",
 	"\tif (hoverTimers.current.open !== 0) clearTimeout(hoverTimers.current.open);",
@@ -174,7 +174,35 @@ component = insert(component, "className: ModelSelect_module_css_default.menu,",
 ]);
 
 // 6. Rename the component so the vendor line is obvious in a diff.
-component = component.replace("function ModelSelect({ locked, available, directory, load, select, t }) {", "function HoverModelSelect({ locked, available, directory, load, select, t }) {");
+const signature = "function ModelSelect({ ";
+if (!component.includes(signature)) throw new Error("ModelSelect signature not found");
+component = component.replace(signature, "function HoverModelSelect({ registerCommands, ");
+
+// The official entry owns conversation.input.model.label. This shadow entry
+// cannot redeclare that slot and receives no renderSlot prop. Keep its plain
+// model-name fallback, as the original custom-desktop component did.
+const labelSlot = /renderSlot\("conversation\.input\.model\.label",\s*\{\s*provider,\s*model,\s*placement,\s*selected\s*\},\s*\{ fallback: model\.name \}\)/;
+if (!labelSlot.test(component)) throw new Error("ModelSelect label slot call changed; review the shadow component adapter");
+component = component.replace(labelSlot, "model.name").replace(
+	", t, renderSlot }) {", ", t }) {"
+);
+
+// Publish the mounted seat's current actions; resolving never performs UI work.
+component = insert(component, "if (!available) return null;", [
+	"(0, react.useEffect)(() => {",
+	"\tif (available) load();",
+	"}, [available, directory]);",
+	"(0, react.useLayoutEffect)(() => registerCommands((action) => {",
+	"\tif (!available || locked || busy) return { status: \"blocked\", reason: \"当前模型选择不可用或正在更新\" };",
+	"\tif (action === \"model\") return {",
+	"\t\tstatus: \"handled\",",
+	"\t\trun: () => { show(); drill(\"model\"); pinHover(); }",
+	"\t};",
+	"\tif (state.current === null || effortChoices.length < 2) return { status: \"blocked\", reason: \"当前模型没有可切换的推理等级，或模型目录尚未就绪\" };",
+	"\tconst index = effortChoices.findIndex((choice) => choice.effort === effectiveEffort);",
+	"\treturn { status: \"handled\", run: () => chooseEffort(effortChoices[(index + 1) % effortChoices.length].effort) };",
+	"}));"
+], "before");
 
 // 7. Module-scope hover timings, next to the other module constants.
 component = insert(component, "/** Unplaced portal card:", [
@@ -194,7 +222,7 @@ const css = region(official, "//#region \\0dsh-css:")
 
 //#region output
 const header = `/**
- * Browser half of \`dsh-custom-desktop\` — one desktop-app-only tweak: hover
+ * Browser half of \`dsh-custom-desktop\` — desktop-only hover and native
  * shortcuts on the composer's model seat (\`conversation.input.model\`).
  *
  * Strategy: register a second occupant of the single slot at priority -1 (a slot
@@ -203,15 +231,16 @@ const header = `/**
  * need: the \`model\` dictionaries, the /model popup, and the per-session
  * ModelDirectoryResolver service behind \`ctx.modelDirectories\`.
  *
- * The component below is vendored VERBATIM from the build the DeepSeek Harness
+ * The component below is vendored from the build the DeepSeek Harness
  * desktop app ships — @deepseek-ai/dsh-client-ui-model-selection@${version}
  * (app.asar/dsh) — minus the catalog/directory/resolver classes, the locale
  * dictionaries and the /model contribution (a resolver and dictionaries are
- * mounted by the official plugin; only ModelSelect is needed here). The ONLY
- * addition is the hover lifecycle: dwelling 150ms on the model name opens the
+ * mounted by the official plugin; only ModelSelect is needed here). The
+ * hover lifecycle adds: dwelling 150ms on the model name opens the
  * provider-grouped model list directly, dwelling on the effort caption opens the
  * effort list, and leaving the seat closes a hover-opened menu after 300ms. The
- * click path is byte-identical to the official one.
+ * click path is unchanged. Two unbound native commands open the model pane
+ * or cycle the current model's effort choices through the existing handlers.
  *
  * Why a vendored copy instead of DOM manipulation: "open straight into pane X"
  * is React state inside the official component. A DOM-level implementation would
@@ -257,6 +286,28 @@ const footer = `\t\t//#region plugin
 \t\t* @param ctx - client root context.
 \t\t*/
 \t\tfunction apply(ctx) {
+\t\t\tconst commands = new Map();
+\t\t\tctx.inject(["shortcuts", "layout"], (scope) => {
+\t\t\t\tfor (const [action, id, label] of [
+\t\t\t\t\t["effort", "custom-desktop.reasoning-effort.cycle", "切换推理等级（Reasoning effort）"],
+\t\t\t\t\t["model", "custom-desktop.model.open", "唤出模型选择卡"]
+\t\t\t\t]) scope.effect(() => scope.shortcuts.register({
+\t\t\t\t\tid,
+\t\t\t\t\tlabel: () => label,
+\t\t\t\t\taliases: [label, id, action === "effort" ? "reasoning effort" : "model selection"],
+\t\t\t\t\tdefaults: {},
+\t\t\t\t\tregions: ["page", "editable", "terminal"],
+\t\t\t\t\tmodals: [],
+\t\t\t\t\tresolve: (context) => {
+\t\t\t\t\t\tconst current = Object.values(ctx.sessions.list.getSnapshot().byId).find((row) => (row.retainedBy.mainView ?? 0) > 0);
+\t\t\t\t\t\tconst resolve = current === undefined ? undefined : commands.get(current.id);
+\t\t\t\t\t\tif (context.modal !== null || scope.layout.panelInfo.getSnapshot().activePanelId !== null || resolve === undefined) {
+\t\t\t\t\t\t\treturn { status: "blocked", reason: "当前没有可操作的会话模型选择器" };
+\t\t\t\t\t\t}
+\t\t\t\t\t\treturn resolve(action);
+\t\t\t\t\t}
+\t\t\t\t}), id);
+\t\t\t});
 \t\t\tctx.inject(["slots", "modelDirectories"], (scope) => {
 \t\t\t\tconst models = scope.modelDirectories;
 \t\t\t\tconst sessions = scope.sessions;
@@ -270,6 +321,10 @@ const footer = `\t\t//#region plugin
 \t\t\t\t\t\tconst available = sessions.subagentAddress(sessionId) === void 0;
 \t\t\t\t\t\treturn {
 \t\t\t\t\t\t\tavailable,
+\t\t\t\t\t\t\tregisterCommands: (resolve) => {
+\t\t\t\t\t\t\t\tcommands.set(sessionId, resolve);
+\t\t\t\t\t\t\t\treturn () => { if (commands.get(sessionId) === resolve) commands.delete(sessionId); };
+\t\t\t\t\t\t\t},
 \t\t\t\t\t\t\tdirectory: directory.store,
 \t\t\t\t\t\t\tload: () => {
 \t\t\t\t\t\t\t\tif (available) directory.load().catch(() => {});
