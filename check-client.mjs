@@ -58,6 +58,8 @@ check("portal menu carries its own enter/leave/pin", /className: ModelSelect_mod
 check("press pins the menu", source.includes("pinHover();") && source.includes("hoverPinned.current = true;"));
 const hoverOpenBody = source.slice(source.indexOf("const hoverOpen = (next) => {"), source.indexOf("const hoverLeave = () => {"));
 check("hover open does not steal focus", !hoverOpenBody.includes(".focus("), "hoverOpen must not call focus()");
+check("seat inject survives a transient session rebind", source.includes("A session scope can be briefly absent while the client rebinds") && source.includes("unavailableFace()"));
+check("seat re-registers after a transient bind failure", source.includes("250 * failures") && source.includes("registerSeat();"));
 //#endregion
 
 //#region 4. factory + apply contract
@@ -128,6 +130,53 @@ check(
 	"seat face matches the official contract",
 	face?.available === true && face.directory === directoryStore && typeof face.load === "function" && typeof face.select === "function"
 );
+//#endregion
+
+//#region 5. transient session bind recovery
+let recoveryRegistrations = 0;
+let recoveryRegistered = null;
+let recoveryFailures = 1;
+const recoveryStore = {
+	getSnapshot: () => ({ current: null, groups: [], status: "idle", failures: [], pending: null, error: null }),
+	subscribe: () => () => {}
+};
+const recoverySlots = {
+	inject: (_name, register) => {
+		register();
+		return () => {};
+	},
+	register: (entry, component) => {
+		recoveryRegistrations += 1;
+		recoveryRegistered = { entry, component };
+		return () => {};
+	}
+};
+exportsObj.apply({
+	sessions: { list: { getSnapshot: () => ({ byId: {} }) } },
+	inject: (_faces, body) =>
+		body({
+			modelDirectories: {
+				directoryFor: () => {
+					if (recoveryFailures-- > 0) throw new Error("session scope not ready");
+					return { store: recoveryStore, load: async () => {}, select: async () => ({ ok: true }) };
+				}
+			},
+			sessions: { subagentAddress: () => undefined },
+			slots: recoverySlots,
+			shortcuts: { register: () => () => {} },
+			layout: { panelInfo: { getSnapshot: () => ({ activePanelId: null }) } },
+			effect: (fn) => fn()
+		}),
+	slots: recoverySlots
+});
+const transientFace = recoveryRegistered?.entry?.inject("session-1");
+check(
+	"transient session bind returns a safe face instead of throwing",
+	transientFace?.available === false && typeof transientFace?.directory?.getSnapshot === "function"
+);
+await new Promise((resolve) => setTimeout(resolve, 300));
+const recoveredFace = recoveryRegistered?.entry?.inject("session-1");
+check("transient session bind re-registers and recovers", recoveryRegistrations >= 2 && recoveredFace?.available === true);
 //#endregion
 
 console.log(failed === 0 ? "\nall checks passed" : `\n${failed} check(s) failed`);

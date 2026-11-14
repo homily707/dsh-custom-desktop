@@ -88,6 +88,14 @@ node check-client.mjs
 点击 trigger → 官方两行菜单不变；鼠标移开 → 300ms 后收起；按下菜单后再移开 → 不自动收起，
 点外部才关。
 
+## 会话重绑保护
+
+桌面客户端在安装/更新插件、Host 重连或切换会话时会短暂重建 session scope。此时
+`ModelDirectoryResolver.directoryFor()` 可能抛出 `resolved no scope` / `resolved no binding`；
+如果从 `inject` 直接把该异常抛出，DSH 的 slot 错误边界会把这个 entry 永久标记为
+`abdicated`，只能关/开插件才能恢复。插件现在会捕获这种瞬态失败，短暂重试重新注册席位，
+最多 3 次后退回官方 ModelSelect。
+
 ## 已知取舍
 
 - **Esc 不关闭 hover 打开的菜单**：hover 路径不 focus 席位，键盘事件到不了组件的

@@ -311,28 +311,94 @@ const footer = `\t\t//#region plugin
 \t\t\tctx.inject(["slots", "modelDirectories"], (scope) => {
 \t\t\t\tconst models = scope.modelDirectories;
 \t\t\t\tconst sessions = scope.sessions;
-\t\t\t\tscope.slots.inject("conversation.input.model", () => scope.slots.register({
-\t\t\t\t\tname: "conversation.input.model",
-\t\t\t\t\tpriority: -1,
-\t\t\t\t\tlocale: "model",
-\t\t\t\t\tregistrant: "dsh-custom-desktop",
-\t\t\t\t\tinject: (sessionId) => {
-\t\t\t\t\t\tconst directory = models.directoryFor(sessionId);
-\t\t\t\t\t\tconst available = sessions.subagentAddress(sessionId) === void 0;
-\t\t\t\t\t\treturn {
-\t\t\t\t\t\t\tavailable,
-\t\t\t\t\t\t\tregisterCommands: (resolve) => {
-\t\t\t\t\t\t\t\tcommands.set(sessionId, resolve);
-\t\t\t\t\t\t\t\treturn () => { if (commands.get(sessionId) === resolve) commands.delete(sessionId); };
-\t\t\t\t\t\t\t},
-\t\t\t\t\t\t\tdirectory: directory.store,
-\t\t\t\t\t\t\tload: () => {
-\t\t\t\t\t\t\t\tif (available) directory.load().catch(() => {});
-\t\t\t\t\t\t\t},
-\t\t\t\t\t\t\tselect: (selection) => available ? directory.select(selection) : Promise.resolve(void 0)
-\t\t\t\t\t\t};
-\t\t\t\t\t}
-\t\t\t\t}, HoverModelSelect));
+\t\t\t\tconst EMPTY_DIRECTORY_SNAPSHOT = {
+\t\t\t\t\tcurrent: null,
+\t\t\t\t\troutable: null,
+\t\t\t\t\tgroups: [],
+\t\t\t\t\tfailures: [],
+\t\t\t\t\tstatus: "idle",
+\t\t\t\t\tpending: null,
+\t\t\t\t\terror: null
+\t\t\t\t};
+\t\t\t\tconst EMPTY_DIRECTORY = {
+\t\t\t\t\tsubscribe: () => () => {},
+\t\t\t\t\tgetSnapshot: () => EMPTY_DIRECTORY_SNAPSHOT
+\t\t\t\t};
+\t\t\t\tlet seat;
+\t\t\t\tlet retry;
+\t\t\t\tlet failures = 0;
+\t\t\t\tlet disposed = false;
+\t\t\t\tconst unavailableFace = () => ({
+\t\t\t\t\tavailable: false,
+\t\t\t\t\tregisterCommands: () => () => {},
+\t\t\t\t\tdirectory: EMPTY_DIRECTORY,
+\t\t\t\t\tload: () => {},
+\t\t\t\t\tselect: () => Promise.resolve(void 0)
+\t\t\t\t});
+\t\t\t\tconst registerSeat = () => {
+\t\t\t\t\tif (disposed || seat !== void 0) return;
+\t\t\t\t\tseat = scope.slots.inject("conversation.input.model", () => scope.slots.register({
+\t\t\t\t\t\tname: "conversation.input.model",
+\t\t\t\t\t\tpriority: -1,
+\t\t\t\t\t\tlocale: "model",
+\t\t\t\t\t\tregistrant: "dsh-custom-desktop",
+\t\t\t\t\t\tinject: (sessionId) => {
+\t\t\t\t\t\t\tconst available = sessions.subagentAddress(sessionId) === void 0;
+\t\t\t\t\t\t\tif (!available) return unavailableFace();
+\t\t\t\t\t\t\tlet directory;
+\t\t\t\t\t\t\ttry {
+\t\t\t\t\t\t\t\tdirectory = models.directoryFor(sessionId);
+\t\t\t\t\t\t\t} catch (error) {
+\t\t\t\t\t\t\t\t// A session scope can be briefly absent while the client rebinds
+\t\t\t\t\t\t\t\t// sessions (plugin install, host reconnect, session switch). Never
+\t\t\t\t\t\t\t\t// throw here: an inject error permanently abdicates this single-slot
+\t\t\t\t\t\t\t\t// entry. Drop and re-register the seat after the scope is ready.
+\t\t\t\t\t\t\t\tfailures += 1;
+\t\t\t\t\t\t\t\tif (failures <= 3) {
+\t\t\t\t\t\t\t\t\tif (retry === void 0) {
+\t\t\t\t\t\t\t\t\t\tretry = setTimeout(() => {
+\t\t\t\t\t\t\t\t\t\t\tretry = void 0;
+\t\t\t\t\t\t\t\t\t\t\tif (disposed) return;
+\t\t\t\t\t\t\t\t\t\t\tseat?.();
+\t\t\t\t\t\t\t\t\t\t\tseat = void 0;
+\t\t\t\t\t\t\t\t\t\t\tregisterSeat();
+\t\t\t\t\t\t\t\t\t\t}, 250 * failures);
+\t\t\t\t\t\t\t\t\t}
+\t\t\t\t\t\t\t\t\treturn unavailableFace();
+\t\t\t\t\t\t\t\t}
+\t\t\t\t\t\t\t\tconsole.warn("[dsh-custom-desktop] model seat unavailable; leaving the official selector in place:", error);
+\t\t\t\t\t\t\t\tsetTimeout(() => {
+\t\t\t\t\t\t\t\t\tif (disposed) return;
+\t\t\t\t\t\t\t\t\tseat?.();
+\t\t\t\t\t\t\t\t\tseat = void 0;
+\t\t\t\t\t\t\t\t}, 0);
+\t\t\t\t\t\t\t\treturn unavailableFace();
+\t\t\t\t\t\t\t}
+\t\t\t\t\t\t\tfailures = 0;
+\t\t\t\t\t\t\treturn {
+\t\t\t\t\t\t\t\tavailable,
+\t\t\t\t\t\t\t\tregisterCommands: (resolve) => {
+\t\t\t\t\t\t\t\t\tcommands.set(sessionId, resolve);
+\t\t\t\t\t\t\t\t\treturn () => { if (commands.get(sessionId) === resolve) commands.delete(sessionId); };
+\t\t\t\t\t\t\t\t},
+\t\t\t\t\t\t\t\tdirectory: directory.store,
+\t\t\t\t\t\t\t\tload: () => {
+\t\t\t\t\t\t\t\t\tif (available) directory.load().catch(() => {});
+\t\t\t\t\t\t\t\t},
+\t\t\t\t\t\t\t\tselect: (selection) => available ? directory.select(selection) : Promise.resolve(void 0)
+\t\t\t\t\t\t\t};
+\t\t\t\t\t\t}
+\t\t\t\t\t}, HoverModelSelect));
+\t\t\t\t};
+\t\t\t\tscope.effect(() => {
+\t\t\t\t\tregisterSeat();
+\t\t\t\t\treturn () => {
+\t\t\t\t\t\tdisposed = true;
+\t\t\t\t\t\tif (retry !== void 0) clearTimeout(retry);
+\t\t\t\t\t\tseat?.();
+\t\t\t\t\t\tseat = void 0;
+\t\t\t\t\t};
+\t\t\t\t}, "dsh-custom-desktop: model seat");
 \t\t\t});
 \t\t}
 \t\texports.apply = apply;

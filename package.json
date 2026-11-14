@@ -1,7 +1,7 @@
 {
 	"name": "dsh-custom-desktop",
 	"description": "Desktop-only DSH composer customization: hover model and effort menus, plus configurable native commands to cycle reasoning effort and open the model picker. Vendored from the desktop 0.2.1-rc.2 build.",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"type": "module",
 	"main": "./index.mjs",
 	"exports": {
