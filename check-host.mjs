@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { apply, inject } from './index.mjs';
 import { firstUserPrefix } from './cache-keepalive.mjs';
 
-assert.deepEqual(inject, ['llm', 'commands']);
+assert.deepEqual(inject, ['llm', 'commands', 'sessions']);
 const source = {
   provider: 'example', model: 'example-model', sessionId: 'session-a',
   messages: [

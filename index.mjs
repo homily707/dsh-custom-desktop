@@ -2,7 +2,7 @@
 import { installCacheKeepalive } from './cache-keepalive.mjs';
 
 export const name = 'custom-desktop';
-export const inject = ['llm', 'commands'];
+export const inject = ['llm', 'commands', 'sessions'];
 
 export function apply(ctx) {
   installCacheKeepalive(ctx);

@@ -1,7 +1,7 @@
 {
 	"name": "dsh-custom-desktop",
-	"description": "Desktop-only DSH composer customization and per-session prefix cache keepalive via /cache slash command.",
-	"version": "0.3.0",
+	"description": "Desktop-only DSH composer customization and per-session prefix cache keepalive via /cache slash command. Store per-attempt cache usage in Session plugin records.",
+	"version": "0.4.0",
 	"type": "module",
 	"main": "./index.mjs",
 	"exports": {
@@ -13,12 +13,13 @@
 	"files": [
 		"index.mjs",
 		"cache-keepalive.mjs",
+		"cache-events.mjs",
 		"client.js",
 		"cordis.patch.yml",
 		"README.md"
 	],
 	"scripts": {
-		"test": "node check-client.mjs && node check-host.mjs"
+		"test": "node check-client.mjs && node check-host.mjs && node check-cache-events.mjs"
 	},
 	"dsh": {
 		"bundle": {
@@ -41,5 +42,8 @@
 		"hover",
 		"desktop"
 	],
-	"license": "MIT"
+	"license": "MIT",
+	"peerDependencies": {
+		"@deepseek-ai/dsh-session": "*"
+	}
 }

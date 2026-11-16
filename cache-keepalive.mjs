@@ -1,4 +1,6 @@
 /** Minimal, session-scoped prompt-prefix cache keepalive for DSH Host. */
+import { appendKeepaliveEvent, keepaliveEvent } from './cache-events.mjs';
+
 const INTERVAL_MS = 4 * 60_000;
 const REQUEST_TIMEOUT_MS = 90_000;
 
@@ -12,7 +14,7 @@ export function firstUserPrefix(options) {
 }
 
 /** Install host-only scheduling and a native /cache [on|off] command. */
-export function installCacheKeepalive(ctx) {
+export function installCacheKeepalive(ctx, { appendEvent = appendKeepaliveEvent } = {}) {
   const sessions = new Map();
   const ownRequests = new WeakSet();
   const logger = ctx.logger('custom-desktop:cache');
@@ -46,21 +48,46 @@ export function installCacheKeepalive(ctx) {
     if (disposed || !state.enabled || !state.prefix || state.warm || state.foreground > 0) return;
     const controller = new AbortController();
     state.warm = controller;
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const prefix = state.prefix;
+    const startedAt = Date.now();
+    let timedOut = false;
+    let status = 'failed';
+    let failureCode = null;
+    let usage = null;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
     try {
-      const request = { ...state.prefix, signal: controller.signal };
+      const request = { ...prefix, signal: controller.signal };
       ownRequests.add(request);
       for await (const chunk of ctx.llm.stream(request)) {
-        if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
-          logger.warn('cache warm failed: %s', chunk.reason.failure?.code ?? 'provider error');
+        if (chunk.type === 'usage') usage = chunk.usage;
+        if (chunk.type === 'finish') {
+          status = chunk.reason.kind === 'error' ? 'failed'
+            : chunk.reason.kind === 'aborted' ? 'aborted' : 'completed';
+          failureCode = chunk.reason.failure?.code ?? null;
+          if (status === 'failed') logger.warn('cache warm failed: %s', failureCode ?? 'provider error');
         }
       }
     } catch (error) {
+      failureCode = typeof error?.code === 'string' ? error.code : null;
       if (!controller.signal.aborted) {
         logger.warn('cache warm failed: %s', error instanceof Error ? error.message : String(error));
       }
     } finally {
       clearTimeout(timeout);
+      if (controller.signal.aborted) status = timedOut ? 'timeout' : 'aborted';
+      const session = ctx.sessions?.get(prefix.sessionId);
+      if (session) {
+        const data = keepaliveEvent({
+          provider: prefix.provider, model: prefix.model, startedAt, endedAt: Date.now(),
+          status, failureCode, usage,
+        });
+        void Promise.resolve().then(() => appendEvent(ctx, session, data)).catch((error) => {
+          logger.warn('cache event save failed: %s', error instanceof Error ? error.message : String(error));
+        });
+      }
       if (state.warm === controller) state.warm = null;
       schedule(state);
     }
