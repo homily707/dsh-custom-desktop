@@ -1,7 +1,7 @@
 {
 	"name": "dsh-custom-desktop",
-	"description": "Desktop-only DSH composer customization: hover model and effort menus, plus configurable native commands to cycle reasoning effort and open the model picker. Vendored from the desktop 0.2.1-rc.2 build.",
-	"version": "0.2.1",
+	"description": "Desktop-only DSH composer customization and per-session prefix cache keepalive via /cache slash command.",
+	"version": "0.3.0",
 	"type": "module",
 	"main": "./index.mjs",
 	"exports": {
@@ -12,12 +12,13 @@
 	},
 	"files": [
 		"index.mjs",
+		"cache-keepalive.mjs",
 		"client.js",
 		"cordis.patch.yml",
 		"README.md"
 	],
 	"scripts": {
-		"test": "node check-client.mjs"
+		"test": "node check-client.mjs && node check-host.mjs"
 	},
 	"dsh": {
 		"bundle": {
