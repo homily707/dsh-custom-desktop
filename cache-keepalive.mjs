@@ -84,9 +84,11 @@ export function installCacheKeepalive(ctx, { appendEvent = appendKeepaliveEvent 
           provider: prefix.provider, model: prefix.model, startedAt, endedAt: Date.now(),
           status, failureCode, usage,
         });
-        void Promise.resolve().then(() => appendEvent(ctx, session, data)).catch((error) => {
+        try {
+          await appendEvent(ctx, session, data);
+        } catch (error) {
           logger.warn('cache event save failed: %s', error instanceof Error ? error.message : String(error));
-        });
+        }
       }
       if (state.warm === controller) state.warm = null;
       schedule(state);
