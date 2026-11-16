@@ -48,6 +48,7 @@ i18n、键盘导航、检索与菜单定位。
 
 - `index.mjs` — Host 入口：注入 LLM 与命令服务并安装缓存保温功能
 - `cache-keepalive.mjs` — Host 保温调度、前缀截断和 `/cache` 命令
+- `cache-stats.mjs` — 每次保温请求的缓存用量计算和本地 JSONL 持久化
 - `cordis.patch.yml` — 一行 Loader insert，让 host 收录本包、client-modules 才会投递 `client.js`
 - `vendor.mjs` — 生成 `client.js` 的 vendor 脚本（不进 npm 包，只在仓库里）
 - `check-client.mjs` — 本地检查（manifest / 注册契约 / hover 静态契约 / factory+apply 执行）
@@ -60,6 +61,7 @@ i18n、键盘导航、检索与菜单定位。
 node vendor.mjs        # 从 app.asar 重新取官方 bundle → 切片 → 打 hover 补丁 → 重写 client.js
 node check-client.mjs  # 校验 UI
 node check-host.mjs    # 校验保温行为
+node check-cache-stats.mjs # 校验缓存命中率及保存
 ```
 
 `client.js` 由 `vendor.mjs` 生成，**不要手改**：改 vendor.mjs 里的补丁点再重新生成。
@@ -85,6 +87,7 @@ link:/Users/lmh/code/homily707/dsh-custom-desktop
 ```sh
 node check-client.mjs
 node check-host.mjs
+node check-cache-stats.mjs
 ```
 
 手工确认（页面刷新后）：悬浮模型名 → 直接出模型列表；悬浮 effort 标签 → 直接出等级列表；
@@ -123,3 +126,18 @@ Host 每隔固定 **4 分钟**重发一次这个前缀，指定 `maxTokens: 1`�
 前台模型请求优先；同一会话不会并行发出多个保温请求；每次保温最多等待 90 秒。关闭、Session 销毁或插件卸载时会清理定时器、取消后台请求。插件不会为关闭的会话主动发请求。
 
 **取舍**：状态仅保存在 Host 内存中，不写入配置或会话日志。重新启动、卸载或销毁会话后默认关闭；开启后直到手动关闭或会话销毁都可能持续每 4 分钟调用 Provider，包括会话空闲时，因此会产生实际 API 费用。若在已完成对话后才开启，需要再发送一条真实 Agent 消息才能捕获前缀。本功能不复用旧插件的完整请求重放或复杂配置。
+
+
+## 缓存保温统计（无 UI）
+
+每次真正发起的保温请求结束后，Host 追加一条 JSONL 记录到：
+
+```text
+$DSH_HOME/state/custom-desktop/cache-keepalive.jsonl
+```
+
+没有指定 `DSH_HOME` 时，使用 `~/.dsh`；目录和文件会自动创建。每行一个独立 JSON 对象，包含 `version`、`sessionId`、`provider`、`model`、`startedAt`、`endedAt`、`durationMs`、`status`、`failureCode`、`usage` 和 `cacheHitRate`。状态分别为 `completed`、`failed`、`aborted` 或 `timeout`；无论成功或失败都记录。不会保存请求正文、system prompt、工具定义或输出内容。
+
+`usage` 保留 Provider 通过 DSH `usage` chunk 上报的 `inputTokens`（未缓存）、`cacheReadTokens`、`cacheWriteTokens`、`outputTokens`。`cacheHitRate = cacheReadTokens / (inputTokens + cacheReadTokens + cacheWriteTokens)`，取 **0–1 小数**（例如 `0.6` 代表 60%）。缺失 `cacheWriteTokens` 按 0 参与计算；未上报 `cacheReadTokens`、没有用量或分母为 0 时，命中率为 `null`，不能视为 0%。如果一个流出现多个 usage chunk，使用最后一个，不累加可能重复的快照。
+
+统计数据不随 `/cache off`、Session 销毁或 Host 重启删除；只记录保温请求，不统计普通对话请求。追加写入失败只记录一条 Host 警告，不阻断会话或后续保温。JSONL 会持续增长，目前不做 UI、文件轮换或历史清理。

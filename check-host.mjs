@@ -1,5 +1,8 @@
 /** Dependency-free behavior checks for the desktop Host cache keepalive. */
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { apply, inject } from './index.mjs';
 import { firstUserPrefix } from './cache-keepalive.mjs';
 
@@ -27,6 +30,9 @@ assert.equal(prefix.signal, undefined);
 assert.equal(prefix.toolHistory, undefined);
 assert.equal(firstUserPrefix({ messages: [{ role: 'system' }] }), null);
 
+const previousDshHome = process.env.DSH_HOME;
+const testHome = mkdtempSync(join(tmpdir(), 'dsh-cache-host-check-'));
+process.env.DSH_HOME = testHome;
 const realSetTimeout = globalThis.setTimeout;
 const realClearTimeout = globalThis.clearTimeout;
 const pending = new Map();
@@ -96,4 +102,20 @@ try {
 } finally {
   globalThis.setTimeout = realSetTimeout;
   globalThis.clearTimeout = realClearTimeout;
+  // The append-only writer is async; allow it to finish before removing its test directory.
+  const statsFile = join(testHome, 'state', 'custom-desktop', 'cache-keepalive.jsonl');
+  let stored = false;
+  for (let i = 0; i < 100; i++) {
+    try {
+      stored = readFileSync(statsFile, 'utf8').includes('"sessionId":"session-a"');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    if (stored) break;
+    await new Promise((resolve) => realSetTimeout(resolve, 10));
+  }
+  assert.equal(stored, true, 'keepalive stats are written to the DSH state directory');
+  if (previousDshHome === undefined) delete process.env.DSH_HOME;
+  else process.env.DSH_HOME = previousDshHome;
+  rmSync(testHome, { recursive: true, force: true });
 }

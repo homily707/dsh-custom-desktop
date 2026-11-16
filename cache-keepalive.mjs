@@ -1,4 +1,6 @@
 /** Minimal, session-scoped prompt-prefix cache keepalive for DSH Host. */
+import { cacheAttemptRecord, createCacheStatsRecorder } from './cache-stats.mjs';
+
 const INTERVAL_MS = 4 * 60_000;
 const REQUEST_TIMEOUT_MS = 90_000;
 
@@ -16,6 +18,7 @@ export function installCacheKeepalive(ctx) {
   const sessions = new Map();
   const ownRequests = new WeakSet();
   const logger = ctx.logger('custom-desktop:cache');
+  const stats = createCacheStatsRecorder();
   let disposed = false;
 
   function stateFor(id) {
@@ -46,13 +49,27 @@ export function installCacheKeepalive(ctx) {
     if (disposed || !state.enabled || !state.prefix || state.warm || state.foreground > 0) return;
     const controller = new AbortController();
     state.warm = controller;
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const startedAt = Date.now();
+    const prefix = state.prefix;
+    let timedOut = false;
+    let usage = null;
+    let status = 'failed';
+    let failureCode = null;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
     try {
-      const request = { ...state.prefix, signal: controller.signal };
+      const request = { ...prefix, signal: controller.signal };
       ownRequests.add(request);
       for await (const chunk of ctx.llm.stream(request)) {
-        if (chunk.type === 'finish' && chunk.reason.kind === 'error') {
-          logger.warn('cache warm failed: %s', chunk.reason.failure?.code ?? 'provider error');
+        // The final usage chunk is authoritative; never add cumulative snapshots.
+        if (chunk.type === 'usage') usage = chunk.usage;
+        if (chunk.type === 'finish') {
+          status = chunk.reason.kind === 'error' ? 'failed'
+            : chunk.reason.kind === 'aborted' ? 'aborted' : 'completed';
+          failureCode = chunk.reason.failure?.code ?? null;
+          if (status === 'failed') logger.warn('cache warm failed: %s', failureCode ?? 'provider error');
         }
       }
     } catch (error) {
@@ -61,6 +78,20 @@ export function installCacheKeepalive(ctx) {
       }
     } finally {
       clearTimeout(timeout);
+      if (controller.signal.aborted) status = timedOut ? 'timeout' : 'aborted';
+      const record = cacheAttemptRecord({
+        sessionId: String(prefix.sessionId),
+        provider: prefix.provider,
+        model: prefix.model,
+        startedAt,
+        endedAt: Date.now(),
+        status,
+        usage,
+        failureCode,
+      });
+      void stats.append(record).catch((error) => {
+        logger.warn('cache usage save failed: %s', error instanceof Error ? error.message : String(error));
+      });
       if (state.warm === controller) state.warm = null;
       schedule(state);
     }
