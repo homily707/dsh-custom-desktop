@@ -58,7 +58,8 @@ i18n、键盘导航、检索与菜单定位。
 
 ```sh
 node vendor.mjs        # 从 app.asar 重新取官方 bundle → 切片 → 打 hover 补丁 → 重写 client.js
-node check-client.mjs  # 校验 UI\nnode check-host.mjs    # 校验保温行为
+node check-client.mjs  # 校验 UI
+node check-host.mjs    # 校验保温行为
 ```
 
 `client.js` 由 `vendor.mjs` 生成，**不要手改**：改 vendor.mjs 里的补丁点再重新生成。
@@ -106,7 +107,6 @@ node check-host.mjs
 - 样式随副本：下次应用升级官方组件改版后，需重新 vendor，否则菜单外观可能与官方游走。
 - 模型名称使用原始 `model.name`，不渲染官方 `conversation.input.model.label` 扩展子槽位：该槽位归官方组件所有，本副本不能重复声明，也不会获得它的 `renderSlot` 权限。
 - 阴影期间官方 ModelSelect 仍被加载（它提供字典与 resolver），只是不渲染席位。
-
 
 ## 会话缓存保温（Host）
 
