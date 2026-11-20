@@ -216,6 +216,19 @@ function send(response, code, value) {
   response.end(JSON.stringify(value));
 }
 
+function matchesRequestOrigin(request) {
+  const origin = request.headers.origin;
+  if (origin === undefined) return true;
+  try {
+    const url = new URL(origin);
+    return (url.protocol === "http:" || url.protocol === "https:")
+      && typeof request.headers.host === "string"
+      && url.host === request.headers.host;
+  } catch {
+    return false;
+  }
+}
+
 export function registerSessionDeleteRoute(ctx) {
   const deleteSession = createSessionDeletion(ctx);
   return ctx.webServer.register({
@@ -230,11 +243,9 @@ export function registerSessionDeleteRoute(ctx) {
       }
       // Required authentication is provided by the Host. Reject cross-origin
       // forms as well, and require a non-simple same-origin header.
-      const host = request.headers.host;
-      const origin = request.headers.origin;
       if ((peer?.principal && peer.principal.kind !== "owner")
         || request.headers["sec-fetch-site"] === "cross-site"
-        || (typeof origin === "string" && (!host || new URL(origin).host !== host))
+        || !matchesRequestOrigin(request)
         || request.headers["x-custom-desktop-delete"] !== "1") {
         send(response, 403, { ok: false, error: "拒绝未授权的删除请求" });
         return;
