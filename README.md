@@ -1,6 +1,6 @@
 # dsh-custom-desktop
 
-DSH 桌面应用（`desktop` profile）专用的 UI 微调：**composer 模型席位悬浮直达，以及两个可配置快捷键的宿主命令**。
+DSH 桌面应用（`desktop` profile）专用的 UI 微调：**composer 模型席位悬浮直达，两个可配置快捷键的宿主命令，以及原生会话右键永久删除**。
 
 只适配 desktop —— 组件是从桌面应用内置的
 `@deepseek-ai/dsh-client-ui-model-selection@0.2.1-rc.2` vendor 的，不保证在其它
@@ -46,12 +46,28 @@ vendored 内容只保留官方 `ModelSelect` 组件本体及其 CSS/clsx/provide
 React state；DOM 方案只能人为合成 trigger→cell 两次点击，并依赖哈希类名。副本方案保住了
 i18n、键盘导航、检索与菜单定位。
 
-- `index.mjs` — host 半：空实现（client-modules 需要每个 bundle 有一个可导入的 host 模块）
+- `index.mjs` — Host 入口：注册永久删除 API（client-modules 仍通过这一 Loader 行发现浏览器模块）
+- `session-delete.host.mjs` — 删除 Host：活动检查、子代理级联、JSONL 安全删除、索引/缓存清理
+- `session-delete.client.js` — 独立维护的原生右键菜单贡献，构建时嵌入 `client.js`
 - `cordis.patch.yml` — 一行 Loader insert，让 host 收录本包、client-modules 才会投递 `client.js`
 - `vendor.mjs` — 生成 `client.js` 的 vendor 脚本（不进 npm 包，只在仓库里）
 - `check-client.mjs` — 本地检查（manifest / 注册契约 / hover 静态契约 / factory+apply 执行）
 
-没有 npm 依赖，没有 host 服务，不注册任何 HTTP 路由。
+没有新增 npm 依赖。Host 现提供受认证保护的删除接口；模型菜单功能仍为纯 Client 实现。
+
+## 会话右键永久删除
+
+在侧栏会话行右键，选择「永久删除会话」，确认后删除日志、缓存、关联子代理及工作区会话索引。独立 Fork 不参与级联；项目工作目录不会删除。
+
+- 使用 DSH 的 `contextMenus.register({ target: "session" })` 加到原生共享菜单，不替换右键菜单，也不引入 Archive Manager 界面。
+- 对运行中、等待交互或有活跃子代理的会话禁用该动作；Host 通过官方 `workspace/session-activity` 再次校验，拒绝仍有活动的会话。
+- Host 端 `POST /api/custom-desktop/delete-session` 使用 WebServer 必需认证、同源校验和专用请求头。请求体为 `{ "sessionId": "..." }`。
+- 仅对经过官方 JSONL 布局校验的会话目录执行物理删除。其他存储格式或无法确认的路径均拒绝。
+- 单条及子代理的清理不是数据库事务。若某一步失败，返回错误，并尽量保留尚未成功清理的会话记账以便重新操作。不可撤销，建议先备份重要会话。
+
+实现借鉴 [dsh-archive-manager](https://github.com/MichengAI/dsh-archive-manager) 的删除顺序和路径验证（Apache-2.0）。功能局限于本插件，不需要额外安装它。
+
+自动检查：`npm test`。包含原有模型席位契约，以及删除路由、活动拦截、子代理/Fork、路径安全和缓存清理测试。仍需在本机 DSH Desktop 实际验证右键样式、鉴权和宿主版本兼容性。
 
 ## 重新 vendor（应用升级后）
 
@@ -60,7 +76,7 @@ node vendor.mjs        # 从 app.asar 重新取官方 bundle → 切片 → 打 
 node check-client.mjs  # 校验
 ```
 
-`client.js` 由 `vendor.mjs` 生成，**不要手改**：改 vendor.mjs 里的补丁点再重新生成。
+`client.js` 由 `vendor.mjs` 生成，**不要手改**：模型席位改 `vendor.mjs`；会话删除菜单改 `session-delete.client.js`，生成器会自动嵌入。
 切片按 region 标记定位（`clsx` / `ModelSelect.module.css` / `provider-order.js` /
 `ModelSelect.js`），锚点找不到会直接报错，不会产出半成品；应用升级后 CSS 哈希（当前
 `cl2Rlq_`）会变，`check-client.mjs` 里对应的断言要一起更新（vendor.mjs 会提示）。
