@@ -179,6 +179,9 @@ test("route enforces authenticated POST shape and forwards a delete to the Host"
   const forbidden = await invoke("POST", { ...headers, "x-custom-desktop-delete": "" }, { sessionId: "main" });
   assert.equal(forbidden.status, 403);
   assert.equal(await exists(f.transcript("main")), true);
+  const malformedOrigin = await invoke("POST", { ...headers, origin: "malformed origin" }, { sessionId: "main" });
+  assert.equal(malformedOrigin.status, 403);
+  assert.equal(await exists(f.transcript("main")), true);
   const deleted = await invoke("POST", headers, { sessionId: "main" });
   assert.equal(deleted.status, 200);
   assert.deepEqual(deleted.body, { ok: true, deleted: true, sessionId: "main", descendantCount: 0 });
