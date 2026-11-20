@@ -18,7 +18,7 @@
 		"README.md"
 	],
 	"scripts": {
-		"test": "node check-client.mjs"
+		"test": "node check-client.mjs && node --test session-delete.test.mjs"
 	},
 	"dsh": {
 		"bundle": {
