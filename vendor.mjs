@@ -416,7 +416,9 @@ const out = [
 	css,
 	region(official, "//#region lib/types/client/provider-order.js"),
 	component,
-	footer
+	// The deletion feature is authored separately: re-vendoring must retain it.
+	readFileSync(join(dirname(fileURLToPath(import.meta.url)), "session-delete.client.js"), "utf8"),
+	footer.replace("const commands = new Map();", "const commands = new Map();\n\t\t\tinstallSessionDelete(ctx);")
 ].join("\n");
 
 writeFileSync(OUT, out);

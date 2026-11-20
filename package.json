@@ -1,7 +1,7 @@
 {
 	"name": "dsh-custom-desktop",
-	"description": "Desktop-only DSH composer customization: hover model and effort menus, plus configurable native commands to cycle reasoning effort and open the model picker. Vendored from the desktop 0.2.1-rc.2 build.",
-	"version": "0.2.1",
+	"description": "Desktop DSH plugin: hover model/effort menus, configurable shortcuts, and safe permanent session deletion from the native context menu.",
+	"version": "0.3.0",
 	"type": "module",
 	"main": "./index.mjs",
 	"exports": {
@@ -12,12 +12,13 @@
 	},
 	"files": [
 		"index.mjs",
+		"session-delete.host.mjs",
 		"client.js",
 		"cordis.patch.yml",
 		"README.md"
 	],
 	"scripts": {
-		"test": "node check-client.mjs"
+		"test": "node check-client.mjs && node --test session-delete.test.mjs"
 	},
 	"dsh": {
 		"bundle": {
@@ -27,7 +28,8 @@
 			"platform": "web",
 			"inject": [
 				"@deepseek-ai/dsh-client-ui-model-selection",
-				"@deepseek-ai/dsh-api-session-controller"
+				"@deepseek-ai/dsh-api-session-controller",
+				"@deepseek-ai/dsh-client-ui-context-menu"
 			]
 		}
 	},
@@ -38,7 +40,8 @@
 		"custom-ui",
 		"model-select",
 		"hover",
-		"desktop"
+		"desktop",
+		"session-delete"
 	],
 	"license": "MIT"
 }
