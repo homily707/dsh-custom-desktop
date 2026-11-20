@@ -61,6 +61,10 @@ async function checkDirectoryChain(dir) {
   }
 }
 
+class TranscriptStillPresentError extends Error {
+  constructor(id) { super("存储后端仍能找到被删除的会话：" + id); }
+}
+
 async function deleteTranscript(persistence, header) {
   const dir = ownedTranscriptDirectory(persistence, header);
   await checkDirectoryChain(dir);
@@ -74,8 +78,12 @@ async function deleteTranscript(persistence, header) {
   if (typeof persistence.stat !== "function") return;
   try {
     const stillThere = await persistence.stat(header.id);
-    if (stillThere !== undefined) throw new Error("存储后端仍能找到被删除的会话");
+    if (stillThere !== undefined) {
+      // Must not treat a positive post-delete stat as a recoverable read error.
+      throw new TranscriptStillPresentError(header.id);
+    }
   } catch (error) {
+    if (error instanceof TranscriptStillPresentError) throw error;
     // A damaged transcript can make stat() throw. Only accept a verified
     // removal of a directory that actually existed before this attempt.
     if (!existed) throw error;
