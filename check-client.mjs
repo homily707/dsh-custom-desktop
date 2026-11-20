@@ -137,20 +137,18 @@ check("two native commands without default bindings", shortcutCommands.length ==
 check("one native session delete action registered", contributedSessionMenu?.target === "session" && contributedSessionMenu.order === 9999);
 const deleteAction = contributedSessionMenu?.resolve({ sessionId: "session-1", displayTitle: "Example" })?.[0];
 check("delete action has destructive styling and callback", deleteAction?.danger === true && deleteAction?.afterContent === true && typeof deleteAction?.run === "function");
-window.confirm = () => false;
 const previousFetch = globalThis.fetch;
-globalThis.fetch = () => { throw new Error("cancel must not invoke fetch"); };
-await deleteAction?.run();
-check("cancelled confirmation does not send a delete request", true);
+let confirmCalls = 0;
+window.confirm = () => { confirmCalls++; return false; };
 let requestSent;
-window.confirm = () => true;
 globalThis.document = { baseURI: "http://localhost:3333/" };
 globalThis.fetch = async (url, options) => {
 	requestSent = { url: String(url), options };
 	return { ok: true, json: async () => ({ ok: true }) };
 };
 await deleteAction?.run();
-check("confirmed delete uses scoped Host POST endpoint", requestSent?.url === "http://localhost:3333/api/custom-desktop/delete-session" && requestSent?.options?.method === "POST" && JSON.parse(requestSent?.options?.body ?? "{}").sessionId === "session-1");
+check("delete runs without a confirmation prompt", confirmCalls === 0);
+check("delete uses scoped Host POST endpoint", requestSent?.url === "http://localhost:3333/api/custom-desktop/delete-session" && requestSent?.options?.method === "POST" && JSON.parse(requestSent?.options?.body ?? "{}").sessionId === "session-1");
 globalThis.fetch = previousFetch;
 check("reuses the official locale namespace", registered?.entry?.locale === "model");
 check("shadow component is the vendored one", typeof registered?.component === "function");

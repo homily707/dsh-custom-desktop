@@ -838,9 +838,6 @@ function installSessionDelete(ctx) {
             if (current?.running || current?.pendingInteraction
               || (current?.runningSubagentCount ?? 0) > 0)
               throw new Error("会话正在运行或等待交互，请先停止任务");
-            const title = displayTitle || sessionId;
-            if (!window.confirm("永久删除会话「" + title + "」及其日志、附件和子代理记录？\n此操作不可撤销，不会删除项目工作目录。"))
-              return;
             const response = await fetch(new URL("api/custom-desktop/delete-session", document.baseURI), {
               method: "POST",
               credentials: "same-origin",
