@@ -20,6 +20,8 @@ const root = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(root, "client.js"), "utf8");
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const patch = readFileSync(join(root, "cordis.patch.yml"), "utf8");
+const deleteSource = readFileSync(join(root, "session-delete.client.js"), "utf8");
+const vendor = readFileSync(join(root, "vendor.mjs"), "utf8");
 
 let failed = 0;
 const check = (label, ok, detail = "") => {
@@ -39,6 +41,8 @@ check("client platform is web", client.platform === "web", JSON.stringify(client
 const injectFaces = client.inject ?? [];
 check("injects the official model-seat row", injectFaces.includes("@deepseek-ai/dsh-client-ui-model-selection"));
 check("injects the session controller", injectFaces.includes("@deepseek-ai/dsh-api-session-controller"));
+check("injects the official context menu", injectFaces.includes("@deepseek-ai/dsh-client-ui-context-menu"));
+check("ships the host delete implementation", pkg.files.includes("session-delete.host.mjs"));
 check("loader row inserted", /id: custom-desktop\b/.test(patch) && /name: dsh-custom-desktop\b/.test(patch));
 //#endregion
 
@@ -46,6 +50,9 @@ check("loader row inserted", /id: custom-desktop\b/.test(patch) && /name: dsh-cu
 check("vendored from the desktop build (cl2Rlq_ styles)", source.includes(".cl2Rlq_trigger{"));
 check("own style tag id (no collision with the official tag)", source.includes('const tagId = "dsh-custom-desktop/model-select.css";'));
 check("loader id is the package name", source.includes('id: "dsh-custom-desktop"'));
+check("delete client is embedded in the bundle", source.includes(deleteSource.trim()));
+check("delete contribution is installed on apply", source.includes("installSessionDelete(ctx);"));
+check("re-vendor keeps the delete contribution", vendor.includes('"session-delete.client.js"') && vendor.includes("installSessionDelete(ctx);"));
 //#endregion
 
 //#region 3. hover contract
@@ -99,6 +106,9 @@ check(
 
 let registered = null;
 const shortcutCommands = [];
+let contributedSessionMenu = null;
+const menuService = { register: (entry) => { contributedSessionMenu = entry; return () => {}; }, notify() {} };
+const sessionList = { getSnapshot: () => ({ byId: {} }), subscribe: () => () => {} };
 const directoryStore = { getSnapshot: () => ({ groups: [], current: null, status: "ready", failures: [], retainedEffort: undefined }), subscribe: () => () => {} };
 const slots = {
 	inject: (_name, register) => register(),
@@ -109,7 +119,8 @@ exportsObj.apply({
 	inject: (_faces, body) =>
 		body({
 			modelDirectories: { directoryFor: () => ({ store: directoryStore, load: async () => {}, select: async () => ({ ok: true }) }) },
-			sessions: { subagentAddress: () => undefined },
+			sessions: { subagentAddress: () => undefined, list: sessionList },
+			contextMenus: menuService,
 			slots,
 			shortcuts: { register: (command) => { shortcutCommands.push(command); return () => {}; } },
 			layout: { panelInfo: { getSnapshot: () => ({ activePanelId: null }) } },
@@ -123,6 +134,24 @@ check(
 	JSON.stringify(registered?.entry?.name) + " priority=" + registered?.entry?.priority
 );
 check("two native commands without default bindings", shortcutCommands.length === 2 && shortcutCommands.every((command) => Object.keys(command.defaults).length === 0));
+check("one native session delete action registered", contributedSessionMenu?.target === "session" && contributedSessionMenu.order === 9999);
+const deleteAction = contributedSessionMenu?.resolve({ sessionId: "session-1", displayTitle: "Example" })?.[0];
+check("delete action has destructive styling and callback", deleteAction?.danger === true && deleteAction?.afterContent === true && typeof deleteAction?.run === "function");
+window.confirm = () => false;
+const previousFetch = globalThis.fetch;
+globalThis.fetch = () => { throw new Error("cancel must not invoke fetch"); };
+await deleteAction?.run();
+check("cancelled confirmation does not send a delete request", true);
+let requestSent;
+window.confirm = () => true;
+globalThis.document = { baseURI: "http://localhost:3333/" };
+globalThis.fetch = async (url, options) => {
+	requestSent = { url: String(url), options };
+	return { ok: true, json: async () => ({ ok: true }) };
+};
+await deleteAction?.run();
+check("confirmed delete uses scoped Host POST endpoint", requestSent?.url === "http://localhost:3333/api/custom-desktop/delete-session" && requestSent?.options?.method === "POST" && JSON.parse(requestSent?.options?.body ?? "{}").sessionId === "session-1");
+globalThis.fetch = previousFetch;
 check("reuses the official locale namespace", registered?.entry?.locale === "model");
 check("shadow component is the vendored one", typeof registered?.component === "function");
 const face = registered?.entry?.inject("session-1");
@@ -161,7 +190,8 @@ exportsObj.apply({
 					return { store: recoveryStore, load: async () => {}, select: async () => ({ ok: true }) };
 				}
 			},
-			sessions: { subagentAddress: () => undefined },
+			sessions: { subagentAddress: () => undefined, list: sessionList },
+			contextMenus: menuService,
 			slots: recoverySlots,
 			shortcuts: { register: () => () => {} },
 			layout: { panelInfo: { getSnapshot: () => ({ activePanelId: null }) } },
