@@ -109,8 +109,10 @@ node check-client.mjs
 桌面客户端在安装/更新插件、Host 重连或切换会话时会短暂重建 session scope。此时
 `ModelDirectoryResolver.directoryFor()` 可能抛出 `resolved no scope` / `resolved no binding`；
 如果从 `inject` 直接把该异常抛出，DSH 的 slot 错误边界会把这个 entry 永久标记为
-`abdicated`，只能关/开插件才能恢复。插件现在会捕获这种瞬态失败，短暂重试重新注册席位，
-最多 3 次后退回官方 ModelSelect。
+`abdicated`，只能关/开插件才能恢复。插件现在会捕获这种瞬态失败，丢掉席位并按退避重新注册
+（250ms 起每次翻倍，封顶 5s），直到会话 scope 就绪或插件卸载；不再限定重试次数，重绑再久也不会
+永久退回官方 ModelSelect。等待期间 Console 会出现一次
+`[dsh-custom-desktop] model seat is waiting for its session scope`。
 
 ## 已知取舍
 

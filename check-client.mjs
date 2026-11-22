@@ -66,7 +66,7 @@ check("press pins the menu", source.includes("pinHover();") && source.includes("
 const hoverOpenBody = source.slice(source.indexOf("const hoverOpen = (next) => {"), source.indexOf("const hoverLeave = () => {"));
 check("hover open does not steal focus", !hoverOpenBody.includes(".focus("), "hoverOpen must not call focus()");
 check("seat inject survives a transient session rebind", source.includes("A session scope can be briefly absent while the client rebinds") && source.includes("unavailableFace()"));
-check("seat re-registers after a transient bind failure", source.includes("250 * failures") && source.includes("registerSeat();"));
+check("seat keeps re-registering after a transient bind failure", source.includes("Math.min(backoff * 2, 5000)") && source.includes("registerSeat();") && !source.includes("failures +="));
 //#endregion
 
 //#region 4. factory + apply contract
@@ -162,7 +162,9 @@ check(
 //#region 5. transient session bind recovery
 let recoveryRegistrations = 0;
 let recoveryRegistered = null;
-let recoveryFailures = 1;
+// Each wait clears the pending retry (250ms, then doubling), so the next inject misses again.
+// Four misses outlast the old 3-retry budget; the seat must still recover afterwards.
+let recoveryFailures = Infinity;
 const recoveryStore = {
 	getSnapshot: () => ({ current: null, groups: [], status: "idle", failures: [], pending: null, error: null }),
 	subscribe: () => () => {}
@@ -202,9 +204,19 @@ check(
 	"transient session bind returns a safe face instead of throwing",
 	transientFace?.available === false && typeof transientFace?.directory?.getSnapshot === "function"
 );
-await new Promise((resolve) => setTimeout(resolve, 300));
-const recoveredFace = recoveryRegistered?.entry?.inject("session-1");
-check("transient session bind re-registers and recovers", recoveryRegistrations >= 2 && recoveredFace?.available === true);
+const injectSeat = async (ms) => {
+	await new Promise((resolve) => setTimeout(resolve, ms));
+	return recoveryRegistered?.entry?.inject("session-1");
+};
+const keptMissing = [];
+for (const ms of [300, 600, 1100]) keptMissing.push((await injectSeat(ms))?.available === false);
+recoveryFailures = 0;
+const recoveredFace = await injectSeat(2100);
+check(
+	"transient session bind keeps re-registering and recovers past three misses",
+	keptMissing.every(Boolean) && recoveryRegistrations >= 5 && recoveredFace?.available === true,
+	`registrations=${recoveryRegistrations}`
+);
 //#endregion
 
 console.log(failed === 0 ? "\nall checks passed" : `\n${failed} check(s) failed`);

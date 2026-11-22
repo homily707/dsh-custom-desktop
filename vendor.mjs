@@ -326,7 +326,7 @@ const footer = `\t\t//#region plugin
 \t\t\t\t};
 \t\t\t\tlet seat;
 \t\t\t\tlet retry;
-\t\t\t\tlet failures = 0;
+\t\t\t\tlet backoff = 0;
 \t\t\t\tlet disposed = false;
 \t\t\t\tconst unavailableFace = () => ({
 \t\t\t\t\tavailable: false,
@@ -352,29 +352,23 @@ const footer = `\t\t//#region plugin
 \t\t\t\t\t\t\t\t// A session scope can be briefly absent while the client rebinds
 \t\t\t\t\t\t\t\t// sessions (plugin install, host reconnect, session switch). Never
 \t\t\t\t\t\t\t\t// throw here: an inject error permanently abdicates this single-slot
-\t\t\t\t\t\t\t\t// entry. Drop and re-register the seat after the scope is ready.
-\t\t\t\t\t\t\t\tfailures += 1;
-\t\t\t\t\t\t\t\tif (failures <= 3) {
-\t\t\t\t\t\t\t\t\tif (retry === void 0) {
-\t\t\t\t\t\t\t\t\t\tretry = setTimeout(() => {
-\t\t\t\t\t\t\t\t\t\t\tretry = void 0;
-\t\t\t\t\t\t\t\t\t\t\tif (disposed) return;
-\t\t\t\t\t\t\t\t\t\t\tseat?.();
-\t\t\t\t\t\t\t\t\t\t\tseat = void 0;
-\t\t\t\t\t\t\t\t\t\t\tregisterSeat();
-\t\t\t\t\t\t\t\t\t\t}, 250 * failures);
-\t\t\t\t\t\t\t\t\t}
-\t\t\t\t\t\t\t\t\treturn unavailableFace();
+\t\t\t\t\t\t\t\t// entry. Drop and re-register the seat after the scope is ready. A rebind
+\t\t\t\t\t\t\t\t// can outlast any fixed retry budget, so keep retrying with a capped
+\t\t\t\t\t\t\t\t// backoff until this scope is disposed rather than give up the seat.
+\t\t\t\t\t\t\t\tif (retry === void 0) {
+\t\t\t\t\t\t\t\t\tif (backoff === 0) console.warn("[dsh-custom-desktop] model seat is waiting for its session scope:", error);
+\t\t\t\t\t\t\t\t\tbackoff = backoff === 0 ? 250 : Math.min(backoff * 2, 5000);
+\t\t\t\t\t\t\t\t\tretry = setTimeout(() => {
+\t\t\t\t\t\t\t\t\t\tretry = void 0;
+\t\t\t\t\t\t\t\t\t\tif (disposed) return;
+\t\t\t\t\t\t\t\t\t\tseat?.();
+\t\t\t\t\t\t\t\t\t\tseat = void 0;
+\t\t\t\t\t\t\t\t\t\tregisterSeat();
+\t\t\t\t\t\t\t\t\t}, backoff);
 \t\t\t\t\t\t\t\t}
-\t\t\t\t\t\t\t\tconsole.warn("[dsh-custom-desktop] model seat unavailable; leaving the official selector in place:", error);
-\t\t\t\t\t\t\t\tsetTimeout(() => {
-\t\t\t\t\t\t\t\t\tif (disposed) return;
-\t\t\t\t\t\t\t\t\tseat?.();
-\t\t\t\t\t\t\t\t\tseat = void 0;
-\t\t\t\t\t\t\t\t}, 0);
 \t\t\t\t\t\t\t\treturn unavailableFace();
 \t\t\t\t\t\t\t}
-\t\t\t\t\t\t\tfailures = 0;
+\t\t\t\t\t\t\tbackoff = 0;
 \t\t\t\t\t\t\treturn {
 \t\t\t\t\t\t\t\tavailable,
 \t\t\t\t\t\t\t\tregisterCommands: (resolve) => {

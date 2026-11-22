@@ -1,7 +1,7 @@
 {
 	"name": "dsh-custom-desktop",
 	"description": "Desktop DSH plugin: hover model/effort menus, configurable shortcuts, and safe permanent session deletion from the native context menu.",
-	"version": "0.3.1",
+	"version": "0.3.2",
 	"type": "module",
 	"main": "./index.mjs",
 	"exports": {

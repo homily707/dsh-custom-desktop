@@ -922,7 +922,7 @@ function installSessionDelete(ctx) {
 				};
 				let seat;
 				let retry;
-				let failures = 0;
+				let backoff = 0;
 				let disposed = false;
 				const unavailableFace = () => ({
 					available: false,
@@ -948,29 +948,23 @@ function installSessionDelete(ctx) {
 								// A session scope can be briefly absent while the client rebinds
 								// sessions (plugin install, host reconnect, session switch). Never
 								// throw here: an inject error permanently abdicates this single-slot
-								// entry. Drop and re-register the seat after the scope is ready.
-								failures += 1;
-								if (failures <= 3) {
-									if (retry === void 0) {
-										retry = setTimeout(() => {
-											retry = void 0;
-											if (disposed) return;
-											seat?.();
-											seat = void 0;
-											registerSeat();
-										}, 250 * failures);
-									}
-									return unavailableFace();
+								// entry. Drop and re-register the seat after the scope is ready. A rebind
+								// can outlast any fixed retry budget, so keep retrying with a capped
+								// backoff until this scope is disposed rather than give up the seat.
+								if (retry === void 0) {
+									if (backoff === 0) console.warn("[dsh-custom-desktop] model seat is waiting for its session scope:", error);
+									backoff = backoff === 0 ? 250 : Math.min(backoff * 2, 5000);
+									retry = setTimeout(() => {
+										retry = void 0;
+										if (disposed) return;
+										seat?.();
+										seat = void 0;
+										registerSeat();
+									}, backoff);
 								}
-								console.warn("[dsh-custom-desktop] model seat unavailable; leaving the official selector in place:", error);
-								setTimeout(() => {
-									if (disposed) return;
-									seat?.();
-									seat = void 0;
-								}, 0);
 								return unavailableFace();
 							}
-							failures = 0;
+							backoff = 0;
 							return {
 								available,
 								registerCommands: (resolve) => {
